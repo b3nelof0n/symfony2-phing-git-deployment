@@ -1,0 +1,4 @@
+host.servername=www1.server.com
+host.username=server
+host.password=pass
+host.server_deploy_path=/srv/www/

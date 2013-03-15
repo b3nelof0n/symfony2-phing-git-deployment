@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="Symfony2 :: Release Management" default="start" basedir="." description="Symfony2 deployment">
+    <target name="start" description="Start Release">
+        <echo message="Deployment console" />
+        <echo message="**************************" />
+        <echo message="Commands:" />
+        <echo message="start_release" />
+        <echo message="update" />
+        <echo message="**************************" />
+    </target>   
+
+     <target name="start_release" description="Start Release">
+        <property name="project" value="myproject" />
+        <property name="mailfile" value="config/mail.properties" />
+        <property name="gitfile" value="config/git.properties" />
+        <property name="tmp_dir" value="/home/${project}/deploy/${project}/" />
+        <property name="package_name" value="${project}_${version}.tar" />
+
+       <property file="${mailfile}" />
+       <available file="${mailfile}" property="mailfilefound" value="true"/>
+       <fail unless="mailfilefound" message="Missing Mail configuration file (${mailfile})!" />
+
+       <property file="${gitfile}" />
+       <available file="${gitfile}" property="gitfilefound" value="true"/>
+       <fail unless="gitfilefound" message="Missing Git configuration file (${gitfile})!" />
+
+        <if>
+         <not>
+           <isset property="host" />
+         </not>
+         <then>
+         <!-- Set default host flag -->
+          <property name="host" 
+              value="testing" 
+              override="true" />
+          <echo message="The value of hostname has been set to ${host}" />
+          <!--  /SYNC/ -->
+         </then>
+        </if>
+
+         <if>
+         <not>
+           <isset property="version" />
+         </not>
+         <then>
+         <!-- Set default host flag -->
+          <property name="version" 
+              value="master" 
+              override="true" />
+          <echo message="The value of Version has been set to ${version}" />
+          <!--  /SYNC/ -->
+         </then>
+        </if>
+
+
+     <echo message="Clone Repository" />
+     <phing phingfile="deploy.xml" inheritRefs="true" target="clone_repository" />
+
+     <echo message="Refresh release Tag..." />
+     <phing phingfile="deploy.xml" inheritRefs="true" target="refresh_release_tag" />
+
+
+     <if>
+         <not>
+           <isset property="no-assets" />
+         </not>
+         <then>
+         <!-- Set no asset gen -->
+         <echo message="Create assets..." />
+         <phing phingfile="deploy.xml" inheritRefs="true" target="create_assets" />
+          <!--  /SYNC/ -->
+         </then>
+    </if>
+
+     <echo message="Warmup cache..." />
+     <phing phingfile="deploy.xml" inheritRefs="true" target="warmup_cache" />
+
+     <echo message="Check Repository for errors..." />
+     <phing phingfile="deploy.xml" inheritRefs="true" target="ckeck_php" />
+
+     <echo message="Build Package..." />
+     <phing phingfile="deploy.xml" inheritRefs="true" target="build_package" />
+
+     <echo message="Sync Package..." />
+     <phing phingfile="deploy.xml" inheritRefs="true" target="sync_package" />
+     
+
+    </target>     
+
+    <target name="sync_package" description="Check Repository">
+       <foreach list="${host}" param="hostname" target="push_package" />
+    </target>
+
+    <target name="push_package" description="Push package to server">
+        <!--  /SYNC/ -->
+        <echo message="Push package ${package_name} to ${hostname} " />
+
+       <property name="host_credital_file" value="config/hosts/${hostname}.properties" />
+       <property file="${host_credital_file}" />
+       <available file="${host_credital_file}" property="hostfilefound" value="true"/>
+       <fail unless="hostfilefound" message="Missing Hostfile configuration file (${host_credital_file})!" />
+       <property name="server_deploy_path" value="${host.server_deploy_path}" /> 
+       
+       <ssh username="${host.username}" 
+             password="${host.password}" 
+             host="${host.servername}" 
+             command="rm -rf /tmp/${host.username}/" />
+       
+        <scp username="${host.username}" password="${host.password}"
+            host="${host.servername}"
+            todir="/tmp/${host.username}/"
+            file="${tmp_dir}${package_name}"
+            level="debug" 
+        />
+        
+        <echo message="execute mkdir" />
+        <ssh username="${host.username}" 
+             password="${host.password}" 
+             host="${host.servername}" 
+             command="mkdir -p /tmp/${host.username}/${version} " 
+        />
+
+        <ssh username="${host.username}" 
+             password="${host.password}" 
+             host="${host.servername}" 
+             command="mkdir -p ${host.server_deploy_path}${project}" 
+        />
+
+        
+
+         
+        <echo message="untar file ${package_name}" />     
+        <ssh username="${host.username}" 
+             password="${host.password}" 
+             host="${host.servername}" 
+             command="tar xf /tmp/${host.username}/${package_name} -C /tmp/${host.username}/${version}" 
+        />
+        
+        <echo message="copy file to ${server_deploy_path}" />
+        <ssh username="${host.username}" 
+             password="${host.password}" 
+             host="${host.servername}" 
+             command="rsync --recursive --links --exclude='.git/' --exclude='log/' -u /tmp/${host.username}/${version}/* ${server_deploy_path}${project}" 
+        />
+
+        <echo message="call fix_perms.sh" />
+        <ssh username="${host.username}" 
+             password="${host.password}" 
+             host="${host.servername}" 
+             command="sh ${server_deploy_path}${project}/app/fix_perms.sh" 
+        />
+
+        <ssh username="${host.username}" 
+             password="${host.password}" 
+             host="${host.servername}" 
+             command="rm -rf /tmp/${host.username}/" 
+        />
+    </target>
+
+    <target name="ckeck_php" description="Check Repository">
+        <phplint deprecatedAsError="true" haltonfailure="true">
+          <fileset dir="${tmp_dir}src/">
+            <include name="**/*.php"/>
+          </fileset>
+        </phplint>
+    </target>
+
+    <target name="clone_repository" description="Clone Repository">
+        <delete dir="${tmp_dir}" includeemptydirs="true" quiet="true" verbose="false" />
+        <mkdir dir="/tmp/${project}/" />
+        <!-- gitPath="/usr/local/git/bin/git" -->
+        <gitclone 
+            repository="${git.repository.url}"
+            targetPath="${tmp_dir}" 
+        />
+        
+        <gitcheckout
+            repository="${tmp_dir}"
+            branchname="${version}" 
+            quiet="false"
+            forcecreate="true"
+            force="true"
+        />
+    </target>     
+    
+    <target name="refresh_release_tag" description="Refresh release Tag...">
+        <reflexive>
+          <fileset dir="${tmp_dir}app/config/parameters/">
+            <include pattern="parameters_prod.ini" />
+            <include pattern="parameters_dev.ini" />
+            <include pattern="parameters_test.ini" />
+            <include pattern="parameters.ini" />
+          </fileset>
+          <filterchain>
+            <replaceregexp>
+              <regexp pattern="{{RELEASE_TAG}}" replace="${version}"/>
+            </replaceregexp>
+          </filterchain>
+        </reflexive>
+    </target>  
+
+    <target name="create_assets" description="Create assets....">
+        <SymfonyConsole console="php ${tmp_dir}app/console" command="assetic:dump">
+            <arg name="env" value="prod" />
+        </SymfonyConsole>
+    </target>
+
+    <target name="warmup_cache" description="Warmup cache...">
+        <SymfonyConsole console="php ${tmp_dir}app/console" command="cache:warmup">
+            <arg name="env" value="prod" />
+        </SymfonyConsole>
+    </target> 
+
+    <target name="build_package" description="Build Package...">
+        
+         <tar destfile="${tmp_dir}/${package_name}" basedir="${tmp_dir}" compression="gzip"/>
+        
+        <available file="${tmp_dir}/${package_name}" property="packagefilefound" value="true"/>
+        <fail unless="packagefilefound" message="Missing ${tmp_dir} file!" />
+
+    </target>
+
+
+
+
+    <target name="send_notification" description="send notification">
+        <mail tolist="${mail}" subject="Deploy ${project} complete" from="mail@myproject.com">
+            Deploy Complete
+            -----------------------
+            Deploy Tag: ${version}
+            Modul: ${project}
+            Servers: ${hostnames}
+            -----------------------
+        </mail>
+    </target>    
+    
+</project>
