@@ -12,9 +12,9 @@ phing -f deploy.xml start_release -Dhost=www1,www1 -Dno-assets=1 -Dversion=v1.03
 
 Options:
 =============================
--Dno-assets 	= No assets will generatet (fast)
--Dversion 		= This tag will deployed
-Dhost 			= Servername to Deploy ( this will map to the file in /config/hosts/) 
+- -Dno-assets 		= No assets will generatet (fast)
+- -Dversion 		= This tag will deployed
+- -Dhost 			= Servername to Deploy ( this will map to the file in /config/hosts/) 
 
 Files:
 =============================
